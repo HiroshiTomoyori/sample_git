@@ -267,3 +267,43 @@ h1 {
 button {
   cursor: pointer;
 }
+
+/* 攻撃時に光る演出 */
+.card.attack-flash {
+  animation: attackFlash 0.35s linear;
+}
+
+@keyframes attackFlash {
+  0%   { box-shadow: 0 0 0px yellow; }
+  50%  { box-shadow: 0 0 15px yellow; }
+  100% { box-shadow: 0 0 0px yellow; }
+}
+
+/* シールドブレイクのゆれ演出 */
+.shield-zone.break {
+  animation: shake 0.45s ease;
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(6px); }
+  50% { transform: translateX(-6px); }
+  75% { transform: translateX(6px); }
+}
+
+/* ==========================================
+   シールドブレイク時の揺れ演出（transform非使用）
+   → margin-left だけで揺らすので中央位置がズレない
+========================================== */
+
+.shield-zone.break {
+  animation: shieldShake 0.45s ease;
+}
+
+@keyframes shieldShake {
+  0%, 100% { margin-left: 0; }
+  20% { margin-left: 6px; }
+  40% { margin-left: -6px; }
+  60% { margin-left: 6px; }
+  80% { margin-left: -6px; }
+}

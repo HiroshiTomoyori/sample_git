@@ -1,68 +1,80 @@
 /* =========================================================
    デュエマ風トランプゲーム 完全版 game.js
-   - ブロッカー（2,3,4,8,J,K）
-   - 攻撃不可ブロッカー：2,3,8
-   - レスト状態（攻撃済は横向き）
-   - ターン開始でアンタップ
-   - 防御側はブロッカー選択可能
-   - CPUも複数ブロッカーからAIで選択
-   - 召喚酔いあり
-   - 毎ターンエネルギー全回復
-   - 直接攻撃で勝敗
+   （ST＋JOKER＋J特例バトル対応）
+
+   ▼カード能力まとめ
+   - 5：召喚時 山札の上から1枚マナへ
+   - 6：召喚時 1ドロー
+   - 7：スピードアタッカー
+   - 10：召喚時 相手手札ランダム1枚墓地へ（ハンデス）
+   - A：呪文(4) 相手バトル1体破壊
+   - 9：呪文(9) 相手バトル全てレスト
+   - Q(12), K(13)：Wブレイカー
+   - J：特例バトル
+       Q, K には勝利
+       7, 8, 10 には敗北
+   - JOKER(JK1,JK2)：コスト13 / ブロッカー / スピードアタッカー / ST
+       召喚時：全バトルゾーンのカードを墓地へ（自分のジョーカーだけ残る）
+       バトル特例：3,4,J に必ず負ける
+   - ブロック：1体につき1ターン1回
+   - アンタップ：自分ターン開始時のみ
+   - ST：A,2,8,9,Q,JK1,JK2
+       プレイヤー → confirm で発動するか選択（発動しないなら手札へ）
+       CPU → Zロジックで自動判断
 ========================================================= */
 
-/* ---------------------------------------------------------
-   定義
---------------------------------------------------------- */
-const suits = ["s", "h", "d", "k"];
+const suits  = ["s","h","d","k"];
 const values = ["A","2","3","4","5","6","7","8","9","10","J","Q","K"];
 
-const blockerValues = ["2","3","4","8","J","K"];      // ブロッカー
-const blockerNoAttackValues = ["2","3","8"];          // 攻撃できないブロッカー
+const blockerValues         = ["2","3","4","8","J","K"];
+const blockerNoAttackValues = ["2","3","8"];
+const speedAttackerValues   = ["7","K","JK1","JK2"]; // Joker も召喚酔いしない
+const wBreakValues          = ["Q","K"];
+const shieldTriggerValues   = ["A","2","8","9","Q","JK1","JK2"]; // ST 対象
+const jokerValues           = ["JK1","JK2"];
 
-// デッキ
+// ゾーン
 let deck = [];
 let cpuDeck = [];
 
-// プレイヤーゾーン
-let hand = [];
+let hand   = [];
 let battle = [];
 let shield = [];
-let mana = [];
+let mana   = [];
 
-// CPUゾーン
-let cpuHand = [];
+let cpuHand   = [];
 let cpuBattle = [];
 let cpuShield = [];
-let cpuMana = [];
+let cpuMana   = [];
 
-// 墓地
-let grave = [];
+let grave    = [];
 let cpuGrave = [];
 
-// 状態管理
-let turn = 1;
-let isPlayerTurn = true;
-let gameOver = false;
-
-let selectedHandIndex = null;
+// 状態
+let turn           = 1;
+let isPlayerTurn   = true;
+let gameOver       = false;
+let selectedHandIndex   = null;
 let selectedBattleIndex = null;
 
 let playerUsedEnergy = 0;
-let cpuUsedEnergy = 0;
+let cpuUsedEnergy    = 0;
 
-let manaCharged = false;
+let manaCharged    = false;
 let cpuManaCharged = false;
 
 let currentCpuAttacker = null;
+let cpuAttackQueue     = [];
 
 const cpuLog = document.getElementById("cpu-log");
 
 /* ---------------------------------------------------------
-   カード関連
+   コスト / パワー
 --------------------------------------------------------- */
 function getCost(v) {
-  if (v === "A") return 1;
+  if (v === "A") return 4;   // 呪文A
+  if (v === "9") return 9;   // 呪文9
+  if (v === "JK1" || v === "JK2") return 13; // Joker
   if (v === "J") return 11;
   if (v === "Q") return 12;
   if (v === "K") return 13;
@@ -70,26 +82,47 @@ function getCost(v) {
 }
 
 function getPower(card) {
-  return card.cost; // コスト＝パワー
+  return card.cost;
 }
 
-/* デッキ生成 */
+/* ---------------------------------------------------------
+   デッキ生成
+--------------------------------------------------------- */
 function createDeck() {
   deck = [];
   cpuDeck = [];
 
+  // 通常カード
   suits.forEach(s => {
     values.forEach(v => {
-      const card = {
-        suit: s,
-        value: v,
-        cost: getCost(v),
-        blocker: blockerValues.includes(v),
+      const c = {
+        suit:   s,
+        value:  v,
+        cost:   getCost(v),
+        blocker:    blockerValues.includes(v),
         cantAttack: blockerNoAttackValues.includes(v)
       };
-      deck.push({ ...card });
-      cpuDeck.push({ ...card });
+      deck.push({ ...c });
+      cpuDeck.push({ ...c });
     });
+  });
+
+  // Joker 2枚（JK1, JK2）
+  const jokers = [
+    { suit: "j", value: "JK1", img: "j01.png" },
+    { suit: "j", value: "JK2", img: "j02.png" }
+  ];
+
+  jokers.forEach(jk => {
+    const base = {
+      suit: jk.suit,
+      value: jk.value,
+      cost: 13,
+      blocker: true,
+      cantAttack: false
+    };
+    deck.push({ ...base });
+    cpuDeck.push({ ...base });
   });
 
   shuffle(deck);
@@ -116,25 +149,28 @@ function startGame() {
   cpuHand   = cpuDeck.splice(0,5);
 
   battle = [];
-  mana = [];
-  grave = [];
+  mana   = [];
+  grave  = [];
 
   cpuBattle = [];
-  cpuMana = [];
-  cpuGrave = [];
+  cpuMana   = [];
+  cpuGrave  = [];
 
   turn = 1;
   isPlayerTurn = true;
   gameOver = false;
 
-  selectedHandIndex = null;
+  selectedHandIndex   = null;
   selectedBattleIndex = null;
 
   playerUsedEnergy = 0;
-  cpuUsedEnergy = 0;
+  cpuUsedEnergy    = 0;
 
-  manaCharged = false;
+  manaCharged    = false;
   cpuManaCharged = false;
+
+  currentCpuAttacker = null;
+  cpuAttackQueue     = [];
 
   cpuLog.innerHTML = "";
 
@@ -142,39 +178,41 @@ function startGame() {
 }
 
 /* ---------------------------------------------------------
-   ターン開始
+   ターン開始（自分側だけアンタップ）
 --------------------------------------------------------- */
 function startTurn() {
-  manaCharged = false;
-  cpuManaCharged = false;
-
   document.getElementById("turn-number").textContent = `ターン: ${turn}`;
 
   if (isPlayerTurn) {
     playerUsedEnergy = 0;
     document.getElementById("player-turn-panel").classList.remove("hidden");
+
+    battle.forEach(c => {
+      c.rest = false;
+      c.hasAttacked = false;
+      c.hasBlocked  = false;
+      if (c.summoningSick) c.summoningSick = false;
+    });
+
   } else {
     cpuUsedEnergy = 0;
     document.getElementById("cpu-turn-panel").classList.remove("hidden");
+
+    cpuBattle.forEach(c => {
+      c.rest = false;
+      c.hasAttacked = false;
+      c.hasBlocked  = false;
+      if (c.summoningSick) c.summoningSick = false;
+    });
   }
 
-  // ドロー（2ターン目以降）
   if (turn > 1) {
     if (isPlayerTurn && deck.length > 0) hand.push(deck.shift());
     if (!isPlayerTurn && cpuDeck.length > 0) cpuHand.push(cpuDeck.shift());
   }
 
-  // アンタップ
-  battle.forEach(c => {
-    c.rest = false;
-    c.hasAttacked = false;
-    if (c.summoningSick) c.summoningSick = false;
-  });
-  cpuBattle.forEach(c => {
-    c.rest = false;
-    c.hasAttacked = false;
-    if (c.summoningSick) c.summoningSick = false;
-  });
+  manaCharged    = false;
+  cpuManaCharged = false;
 
   render();
 }
@@ -198,9 +236,9 @@ document.getElementById("end-turn-btn").onclick = () => {
 /* ---------------------------------------------------------
    ターン開始パネル
 --------------------------------------------------------- */
-document.getElementById("btn-player-start").onclick = () =>
+document.getElementById("btn-player-start").onclick = () => {
   document.getElementById("player-turn-panel").classList.add("hidden");
-
+};
 document.getElementById("btn-cpu-start").onclick = () => {
   document.getElementById("cpu-turn-panel").classList.add("hidden");
   cpuAction();
@@ -223,7 +261,7 @@ function cpuAction() {
     logCPU(`CPUが ${cardName(c)} をマナに置いた`);
   }
 
-  // 召喚（高コスト優先）
+  // 呪文使用 or 召喚（高コスト優先）
   while (true) {
     const usable = cpuMana.length - cpuUsedEnergy;
     const candidates = cpuHand.filter(c => c.cost <= usable);
@@ -232,115 +270,150 @@ function cpuAction() {
     candidates.sort((a, b) => b.cost - a.cost);
     const chosen = candidates[0];
 
+    // 呪文 A / 9
+    if (chosen.value === "A" || chosen.value === "9") {
+      cpuUsedEnergy += chosen.cost;
+      playSpell(chosen, true);
+      cpuHand.splice(cpuHand.indexOf(chosen), 1);
+      continue;
+    }
+
+    // クリーチャー召喚（Joker含む）
     cpuUsedEnergy += chosen.cost;
-    cpuBattle.push({
+    const summoned = {
       ...chosen,
-      summoningSick: true,
+      summoningSick: !speedAttackerValues.includes(chosen.value),
       hasAttacked: false,
+      hasBlocked:  false,
       rest: false
-    });
+    };
+    cpuBattle.push(summoned);
     cpuHand.splice(cpuHand.indexOf(chosen), 1);
 
-    logCPU(`CPUが ${cardName(chosen)} を召喚（${chosen.cost}）`);
+    logCPU(`CPUが ${cardName(chosen)} を召喚（コスト ${chosen.cost}）`);
+
+    triggerOnSummon(summoned, true);
   }
 
   render();
 
-  // 攻撃候補
-  const attacker = cpuBattle.find(
+  // 攻撃準備
+  cpuAttackQueue = cpuBattle.filter(
     c => !c.summoningSick && !c.hasAttacked && !c.cantAttack
   );
 
-  if (!attacker) {
+  if (cpuAttackQueue.length === 0) {
     logCPU("CPUは攻撃しなかった");
     logCPU("=== CPUターン終了 ===");
     endTurn();
     return;
   }
 
-  currentCpuAttacker = attacker;
-  cpuAttack();
+  logCPU(`CPUは ${cpuAttackQueue.length} 体で攻撃準備`);
+  startNextCpuAttack();
 }
 
 /* ---------------------------------------------------------
-   CPU攻撃処理
+   CPU攻撃キュー処理
+--------------------------------------------------------- */
+function startNextCpuAttack() {
+  if (gameOver) return;
+
+  while (cpuAttackQueue.length > 0) {
+    const attacker = cpuAttackQueue.shift();
+
+    if (!cpuBattle.includes(attacker)) continue;
+    if (attacker.hasAttacked || attacker.cantAttack || attacker.summoningSick) continue;
+
+    currentCpuAttacker = attacker;
+    cpuAttack();
+    return;
+  }
+
+  logCPU("⚔ CPUの攻撃終了");
+  logCPU("=== CPUターン終了 ===");
+  endTurn();
+}
+
+/* ---------------------------------------------------------
+   CPU攻撃処理（1体分）
 --------------------------------------------------------- */
 function cpuAttack() {
   const attacker = currentCpuAttacker;
   if (!attacker || gameOver) return;
 
+  const idx = cpuBattle.indexOf(attacker);
+  const attackerEl = document.querySelectorAll("#cpu-battle-zone .card")[idx];
+  if (attackerEl) {
+    attackerEl.classList.add("attack-flash");
+    setTimeout(() => attackerEl.classList.remove("attack-flash"), 400);
+  }
+
+  logCPU(`⚔ CPUの ${cardName(attacker)} の攻撃！`);
+
   if (attacker.cantAttack) {
-    logCPU(`${cardName(attacker)} はブロッカー専用のため攻撃不可`);
     attacker.hasAttacked = true;
-    attacker.rest = true;
+    attacker.rest        = true;
     finishCpuAttack();
     return;
   }
 
-  const playerBlockers = battle.filter(c => c.blocker);
-
-  // プレイヤーに選ばせる
+  // プレイヤーブロッカー
+// ★ タップしているカードはブロック不可
+const playerBlockers = battle.filter(
+  c => c.blocker && !c.hasBlocked && !c.rest
+);
   if (playerBlockers.length > 0) {
     openPlayerBlockPanel(attacker, playerBlockers);
     return;
   }
 
-  // シールド攻撃
-  if (shield.length > 0) {
-    const broken = shield.shift();
-    grave.push(broken);
-    logCPU(`CPUの ${cardName(attacker)} の攻撃！ シールドブレイク`);
+  // Wブレイカー効果
+  let breakCount = wBreakValues.includes(attacker.value) ? 2 : 1;
+  breakCount = breakPlayerShields(attacker, breakCount);
+
+  if (shield.length === 0 && breakCount > 0) {
+    alert("CPUの直接攻撃！あなたの敗北…");
     attacker.hasAttacked = true;
-    attacker.rest = true;
+    attacker.rest        = true;
+    gameOver = true;
     render();
-    finishCpuAttack();
     return;
   }
 
-  // 本体攻撃
-  logCPU(`CPUの ${cardName(attacker)} の攻撃！ 直接攻撃！`);
-  alert("CPUの直接攻撃！あなたの敗北…");
   attacker.hasAttacked = true;
-  attacker.rest = true;
-  gameOver = true;
+  attacker.rest        = true;
   render();
+  finishCpuAttack();
 }
 
-/* CPU攻撃終了処理 */
 function finishCpuAttack() {
   currentCpuAttacker = null;
-  if (!gameOver) {
-    logCPU("=== CPUターン終了 ===");
-    endTurn();
-  }
+  if (!gameOver) startNextCpuAttack();
 }
 
 /* ---------------------------------------------------------
-   CPUが防御側のとき、どのブロッカーを出すかAI判断
+   CPU 防御側ブロッカー選択（賢く選ぶ）
 --------------------------------------------------------- */
 function chooseCpuBlocker(attacker, blockers) {
   const ap = getPower(attacker);
+  const strong = blockers.filter(b => getPower(b) >= ap);
 
-  // 勝てる or 相打ち可能ブロッカーを探す（パワー低い順）
-  const good = blockers.filter(b => getPower(b) >= ap);
-  if (good.length > 0) {
-    good.sort((a, b) => getPower(a) - getPower(b));
-    return good[0];
+  if (strong.length > 0) {
+    strong.sort((a, b) => getPower(a) - getPower(b));
+    return strong[0];
   }
 
-  // 全員負ける場合 → 最も弱いブロッカーを切る
-  const sorted = [...blockers].sort((a, b) => getPower(a) - getPower(b));
-  return sorted[0];
+  blockers.sort((a, b) => getPower(a) - getPower(b));
+  return blockers[0];
 }
 
 /* ---------------------------------------------------------
-   プレイヤーが CPU の攻撃に対して
-   「どのブロッカーでブロックするか」を選ぶ UI
-   （block-select-panel / block-select-list / block-select-cancel 必須）
+   プレイヤーのブロック選択 UI
 --------------------------------------------------------- */
 function openPlayerBlockPanel(attacker, blockers) {
-  const panel     = document.getElementById("block-select-panel");
-  const list      = document.getElementById("block-select-list");
+  const panel = document.getElementById("block-select-panel");
+  const list  = document.getElementById("block-select-list");
   const cancelBtn = document.getElementById("block-select-cancel");
 
   panel.classList.remove("hidden");
@@ -364,9 +437,16 @@ function openPlayerBlockPanel(attacker, blockers) {
 
     cardDiv.onclick = () => {
       const idx = battle.indexOf(blocker);
-      battleCards(attacker, blocker, idx, false); // false = 防御側はプレイヤー
+      logCPU(`🛡 プレイヤーの ${cardName(blocker)} がブロック！`);
+
+      blocker.hasBlocked = true;
+      blocker.rest       = true;
+
+      battleCards(attacker, blocker, idx, false);
+
       attacker.hasAttacked = true;
-      attacker.rest = true;
+      attacker.rest        = true;
+
       panel.classList.add("hidden");
       finishCpuAttack();
     };
@@ -374,41 +454,150 @@ function openPlayerBlockPanel(attacker, blockers) {
     list.appendChild(cardDiv);
   });
 
-  // ブロックしない
   cancelBtn.onclick = () => {
     panel.classList.add("hidden");
 
-    // シールドへ通す
-    if (shield.length > 0) {
-      const broken = shield.shift();
-      grave.push(broken);
-      logCPU(`CPUの ${cardName(attacker)} の攻撃！ シールドブレイク`);
+    let breakCount = wBreakValues.includes(attacker.value) ? 2 : 1;
+    breakCount = breakPlayerShields(attacker, breakCount);
+
+    if (shield.length === 0 && breakCount > 0) {
+      alert("CPUの直接攻撃！あなたの敗北…");
       attacker.hasAttacked = true;
-      attacker.rest = true;
+      attacker.rest        = true;
+      gameOver = true;
       render();
-      finishCpuAttack();
       return;
     }
 
-    // 本体へ
-    logCPU(`CPUの ${cardName(attacker)} の攻撃！ 直接攻撃`);
-    alert("CPUの直接攻撃！あなたの敗北…");
     attacker.hasAttacked = true;
-    attacker.rest = true;
-    gameOver = true;
+    attacker.rest        = true;
+
     render();
+    finishCpuAttack();
   };
 }
 
 /* ---------------------------------------------------------
-   ブロック時の戦闘処理
+   バトル処理（ブロック時バトル）★J特例・JOKER特例あり
 --------------------------------------------------------- */
 function battleCards(attacker, defender, defenderIndex, isCPUDefender) {
   const ap = getPower(attacker);
   const dp = getPower(defender);
 
+  /* -----------------------------------------
+     ▼ Joker 特例：3,4,J に必ず負ける
+  ----------------------------------------- */
+  if (jokerValues.includes(attacker.value) &&
+      ["3","4","J"].includes(defender.value)) {
+
+    logCPU(`☠ ジョーカー(${cardName(attacker)})は ${cardName(defender)} に敗北！`);
+
+    if (isCPUDefender) {
+      grave.push(attacker);
+      battle.splice(battle.indexOf(attacker), 1);
+    } else {
+      cpuGrave.push(attacker);
+      cpuBattle.splice(cpuBattle.indexOf(attacker), 1);
+    }
+    render();
+    return;
+  }
+
+  if (jokerValues.includes(defender.value) &&
+      ["3","4","J"].includes(attacker.value)) {
+
+    logCPU(`☠ ジョーカー(${cardName(defender)})は ${cardName(attacker)} に敗北！`);
+
+    if (isCPUDefender) {
+      cpuGrave.push(defender);
+      cpuBattle.splice(defenderIndex, 1);
+    } else {
+      grave.push(defender);
+      battle.splice(defenderIndex, 1);
+    }
+    render();
+    return;
+  }
+
+  /* -----------------------------------------
+     ▼ J（ジャック）の特例ルール
+       - J は Q/K に勝つ
+       - J は 7/8/10 に負ける
+  ----------------------------------------- */
+
+  // 攻撃側 J
+  if (attacker.value === "J") {
+    // J が Q, K に勝つ
+    if (["Q","K"].includes(defender.value)) {
+      logCPU(`⚡ 特例：${cardName(attacker)} は ${cardName(defender)} に勝利！`);
+
+      if (isCPUDefender) {
+        cpuGrave.push(defender);
+        cpuBattle.splice(defenderIndex, 1);
+      } else {
+        grave.push(defender);
+        battle.splice(defenderIndex, 1);
+      }
+      render();
+      return;
+    }
+
+    // J が 7,8,10 に負ける
+    if (["7","8","10"].includes(defender.value)) {
+      logCPU(`☠ 特例：${cardName(attacker)} は ${cardName(defender)} に敗北！`);
+
+      if (isCPUDefender) {
+        grave.push(attacker);
+        battle.splice(battle.indexOf(attacker), 1);
+      } else {
+        cpuGrave.push(attacker);
+        cpuBattle.splice(cpuBattle.indexOf(attacker), 1);
+      }
+      render();
+      return;
+    }
+  }
+
+  // 防御側 J
+  if (defender.value === "J") {
+    // J が Q, K に勝つ（防御側 J）
+    if (["Q","K"].includes(attacker.value)) {
+      logCPU(`⚡ 特例：${cardName(defender)} は ${cardName(attacker)} に勝利！`);
+
+      if (isCPUDefender) {
+        grave.push(attacker);
+        battle.splice(battle.indexOf(attacker), 1);
+      } else {
+        cpuGrave.push(attacker);
+        cpuBattle.splice(cpuBattle.indexOf(attacker), 1);
+      }
+      render();
+      return;
+    }
+
+    // J が 7,8,10 に負ける
+    if (["7","8","10"].includes(attacker.value)) {
+      logCPU(`☠ 特例：${cardName(defender)} は ${cardName(attacker)} に敗北！`);
+
+      if (isCPUDefender) {
+        cpuGrave.push(defender);
+        cpuBattle.splice(defenderIndex, 1);
+      } else {
+        grave.push(defender);
+        battle.splice(defenderIndex, 1);
+      }
+      render();
+      return;
+    }
+  }
+
+  /* -----------------------------------------
+     ▼ 通常バトル（パワー勝負）
+  ----------------------------------------- */
+
+  logCPU(`🛡 ${cardName(defender)} が ${cardName(attacker)} をブロック！`);
+
   if (ap > dp) {
-    // 防御側が死亡
     if (isCPUDefender) {
       cpuGrave.push(defender);
       cpuBattle.splice(defenderIndex, 1);
@@ -416,9 +605,11 @@ function battleCards(attacker, defender, defenderIndex, isCPUDefender) {
       grave.push(defender);
       battle.splice(defenderIndex, 1);
     }
+
+    logCPU(`💥 ${cardName(attacker)} が ${cardName(defender)} を倒した！`);
     alert(`${cardName(attacker)} が ${cardName(defender)} を倒した！`);
+
   } else if (ap < dp) {
-    // 攻撃側が死亡
     if (isCPUDefender) {
       grave.push(attacker);
       battle.splice(battle.indexOf(attacker), 1);
@@ -426,9 +617,11 @@ function battleCards(attacker, defender, defenderIndex, isCPUDefender) {
       cpuGrave.push(attacker);
       cpuBattle.splice(cpuBattle.indexOf(attacker), 1);
     }
+
+    logCPU(`☠ ${cardName(attacker)} はブロックされて倒された…`);
     alert(`${cardName(attacker)} はブロックされて倒された…`);
+
   } else {
-    // 相打ち
     if (isCPUDefender) {
       cpuGrave.push(defender);
       cpuBattle.splice(defenderIndex, 1);
@@ -440,6 +633,8 @@ function battleCards(attacker, defender, defenderIndex, isCPUDefender) {
       cpuGrave.push(attacker);
       cpuBattle.splice(cpuBattle.indexOf(attacker), 1);
     }
+
+    logCPU("⚡ 相打ち！");
     alert("相打ち！");
   }
 
@@ -450,6 +645,8 @@ function battleCards(attacker, defender, defenderIndex, isCPUDefender) {
    カード画像
 --------------------------------------------------------- */
 function getCardImagePath(card) {
+  if (card.value === "JK1") return "imgs/j01.png";
+  if (card.value === "JK2") return "imgs/j02.png";
   return `imgs/${card.suit}${valueToNumber(card.value)}.png`;
 }
 
@@ -463,14 +660,14 @@ function valueToNumber(v) {
 }
 
 /* ---------------------------------------------------------
-   描画メイン
+   描画（ゾーン共通）
 --------------------------------------------------------- */
 function render() {
-  renderZone("hand-zone",       hand,      "player-hand");
-  renderZone("battle-zone",     battle,    "player-battle");
-  renderZone("shield-zone",     shield,    "player-shield");
+  renderZone("hand-zone", hand, "player-hand");
+  renderZone("battle-zone", battle, "player-battle");
+  renderZone("shield-zone", shield, "player-shield");
 
-  renderZone("cpu-hand-zone",   cpuHand,   "cpu-hand");
+  renderZone("cpu-hand-zone", cpuHand, "cpu-hand");
   renderZone("cpu-battle-zone", cpuBattle, "cpu-battle");
   renderZone("cpu-shield-zone", cpuShield, "cpu-shield");
 
@@ -478,14 +675,10 @@ function render() {
 
   document.getElementById("player-energy").innerHTML =
     `エネルギー<br>${mana.length - playerUsedEnergy} / ${mana.length}`;
-
   document.getElementById("cpu-energy").innerHTML =
     `エネルギー<br>${cpuMana.length - cpuUsedEnergy} / ${cpuMana.length}`;
 }
 
-/* ---------------------------------------------------------
-   ゾーン描画
---------------------------------------------------------- */
 function renderZone(id, cards, zoneType) {
   const zone = document.getElementById(id);
   zone.innerHTML = "";
@@ -493,8 +686,6 @@ function renderZone(id, cards, zoneType) {
   cards.forEach((c, index) => {
     const div = document.createElement("div");
     div.className = "card";
-
-    // レスト状態ならクラス付与（CSS側で横向きに）
     if (c.rest) div.classList.add("rest");
 
     const img = document.createElement("img");
@@ -507,10 +698,8 @@ function renderZone(id, cards, zoneType) {
     } else {
       img.src = getCardImagePath(c);
     }
-
     div.appendChild(img);
 
-    // ブロッカーバッジ
     if (c.blocker) {
       const bd = document.createElement("div");
       bd.className = "blocker-badge";
@@ -518,22 +707,21 @@ function renderZone(id, cards, zoneType) {
       div.appendChild(bd);
     }
 
-    // プレイヤー手札 → 行動パネル
+    // ========= 手札クリック → アクションパネル =========
     if (zoneType === "player-hand" && isPlayerTurn && !gameOver) {
       div.onclick = () => {
         if (gameOver) return;
 
-        document
-          .querySelectorAll("#hand-zone .card")
+        document.querySelectorAll("#hand-zone .card")
           .forEach(x => x.classList.remove("selected"));
-
         div.classList.add("selected");
+
         selectedHandIndex = index;
         document.getElementById("action-panel").classList.remove("hidden");
       };
     }
 
-    // プレイヤーバトルゾーン → 攻撃パネル
+    // ========= バトルカードクリック → 攻撃パネル =========
     if (zoneType === "player-battle" && isPlayerTurn && !gameOver) {
       div.onclick = () => {
         if (gameOver) return;
@@ -541,13 +729,21 @@ function renderZone(id, cards, zoneType) {
         const ref = battle[index];
 
         if (ref.summoningSick) {
-          alert("召喚酔い中のため攻撃できません");
+          alert("召喚酔い中です");
           return;
         }
         if (ref.hasAttacked) {
-          alert("すでに攻撃済みです");
+          alert("このターンはすでに攻撃済みです");
           return;
         }
+        if (ref.cantAttack) {
+          alert("このカードは攻撃できません");
+          return;
+        }
+
+        document.querySelectorAll("#battle-zone .card")
+          .forEach(x => x.classList.remove("selected"));
+        div.classList.add("selected");
 
         selectedBattleIndex = index;
         document.getElementById("attack-panel").classList.remove("hidden");
@@ -557,21 +753,20 @@ function renderZone(id, cards, zoneType) {
     zone.appendChild(div);
   });
 
-  // 手札は扇状に並べる
   if (id === "hand-zone" || id === "cpu-hand-zone") {
     arrangeHandFan(id);
   }
 }
 
 /* ---------------------------------------------------------
-   扇状手札配置
+   扇形配置
 --------------------------------------------------------- */
 function arrangeHandFan(id) {
   const cards = document.querySelectorAll(`#${id} .card`);
   const total = cards.length;
   if (total === 0) return;
 
-  const spread = 50;          // 角度の広がり
+  const spread = 50;
   const start  = -spread / 2;
 
   cards.forEach((el, i) => {
@@ -581,16 +776,14 @@ function arrangeHandFan(id) {
 }
 
 /* ---------------------------------------------------------
-   山札 / 捨て札描画
+   山札・墓地表示
 --------------------------------------------------------- */
 function renderDeckAndGrave() {
-  // プレイヤー山札
   document.getElementById("player-deck-zone").innerHTML = `
     <img src="imgs/back.png" class="card-img">
     <div class="deck-count">${deck.length}</div>
   `;
 
-  // プレイヤー捨て札
   const pg = document.getElementById("player-grave-zone");
   if (grave.length > 0) {
     const top = grave[grave.length - 1];
@@ -598,17 +791,13 @@ function renderDeckAndGrave() {
       <img src="${getCardImagePath(top)}" class="card-img">
       <div class="deck-count">${grave.length}</div>
     `;
-  } else {
-    pg.innerHTML = "";
-  }
+  } else pg.innerHTML = "";
 
-  // CPU山札
   document.getElementById("cpu-deck-zone").innerHTML = `
     <img src="imgs/back.png" class="card-img">
     <div class="deck-count">${cpuDeck.length}</div>
   `;
 
-  // CPU捨て札
   const cg = document.getElementById("cpu-grave-zone");
   if (cpuGrave.length > 0) {
     const top = cpuGrave[cpuGrave.length - 1];
@@ -616,19 +805,17 @@ function renderDeckAndGrave() {
       <img src="${getCardImagePath(top)}" class="card-img">
       <div class="deck-count">${cpuGrave.length}</div>
     `;
-  } else {
-    cg.innerHTML = "";
-  }
+  } else cg.innerHTML = "";
 }
 
 /* ---------------------------------------------------------
-   行動パネル（手札）
+   手札アクション（マナ / 召喚）
 --------------------------------------------------------- */
 document.getElementById("btn-mana").onclick = () => {
   if (gameOver) return;
 
   if (manaCharged) {
-    alert("このターンはもうエネルギーをチャージしています");
+    alert("このターンはすでにエネルギーをチャージしています");
     return;
   }
 
@@ -648,21 +835,33 @@ document.getElementById("btn-summon").onclick = () => {
   const usable = mana.length - playerUsedEnergy;
 
   if (usable < c.cost) {
-    alert(`エネルギー不足！ 必要${c.cost} / 現在${usable}`);
+    alert(`エネルギー不足（必要${c.cost} / 残り${usable}）`);
     return;
   }
 
+  // 呪文（A / 9）
+  if (c.value === "A" || c.value === "9") {
+    playerUsedEnergy += c.cost;
+    playSpell(c, false);
+    hand.splice(selectedHandIndex, 1);
+    closePanels();
+    render();
+    return;
+  }
+
+  // 召喚
   playerUsedEnergy += c.cost;
-
-  battle.push({
+  const summoned = {
     ...c,
-    summoningSick: true,
+    summoningSick: !speedAttackerValues.includes(c.value),
     hasAttacked: false,
+    hasBlocked: false,
     rest: false
-  });
-
+  };
+  battle.push(summoned);
   hand.splice(selectedHandIndex, 1);
 
+  triggerOnSummon(summoned, false);
   closePanels();
   render();
 };
@@ -672,17 +871,18 @@ document.getElementById("btn-cancel").onclick = closePanels;
 function closePanels() {
   document.getElementById("action-panel").classList.add("hidden");
   document.getElementById("attack-panel").classList.add("hidden");
-  const selPanel = document.getElementById("block-select-panel");
-  if (selPanel) selPanel.classList.add("hidden");
+  document.getElementById("block-select-panel").classList.add("hidden");
 
-  selectedHandIndex = null;
+  selectedHandIndex   = null;
   selectedBattleIndex = null;
+
+  document
+    .querySelectorAll("#hand-zone .card, #battle-zone .card")
+    .forEach(x => x.classList.remove("selected"));
 }
 
 /* ---------------------------------------------------------
-   攻撃（プレイヤー側）
-   - 2,3,8 は攻撃不可（ブロッカー専用）
-   - CPU側にブロッカーがいれば chooseCpuBlocker() で自動選択
+   プレイヤー攻撃
 --------------------------------------------------------- */
 document.getElementById("btn-attack").onclick = () => {
   if (gameOver) return;
@@ -694,44 +894,55 @@ document.getElementById("btn-attack").onclick = () => {
   }
 
   if (attacker.summoningSick) {
-    alert("召喚酔い中のため攻撃できません");
+    alert("召喚酔い中です");
     return;
   }
-
   if (attacker.hasAttacked) {
-    alert("すでに攻撃済みです");
+    alert("このターンはすでに攻撃済みです");
     return;
   }
-
   if (attacker.cantAttack) {
-    alert("このクリーチャーは攻撃できません（ブロッカー専用）");
+    alert("このカードは攻撃できません");
     closePanels();
     return;
   }
 
-  // CPU側ブロッカー
-  const cpuBlockers = cpuBattle.filter(c => c.blocker);
+  const attackerEl = document.querySelectorAll("#battle-zone .card")[selectedBattleIndex];
+  if (attackerEl) {
+    attackerEl.classList.add("attack-flash");
+    setTimeout(() => attackerEl.classList.remove("attack-flash"), 400);
+  }
+
+// ★ タップしているカードはブロック不可
+const cpuBlockers = cpuBattle.filter(
+  c => c.blocker && !c.hasBlocked && !c.rest
+);
 
   if (cpuBlockers.length > 0) {
     const blocker = chooseCpuBlocker(attacker, cpuBlockers);
-    const idx = cpuBattle.indexOf(blocker);
+    const idx     = cpuBattle.indexOf(blocker);
 
-    battleCards(attacker, blocker, idx, true); // true = 防御側CPU
+    logCPU(`🛡 CPUの ${cardName(blocker)} がブロック！`);
+
+    blocker.hasBlocked = true;
+    blocker.rest       = true;
+
+    battleCards(attacker, blocker, idx, true);
+
     attacker.hasAttacked = true;
-    attacker.rest = true;
+    attacker.rest        = true;
+
     closePanels();
     return;
   }
 
-  // ブロッカーがいない → シールド or 本体へ
-  if (cpuShield.length > 0) {
-    const broken = cpuShield.shift();
-    cpuGrave.push(broken);
-    alert("シールドブレイク！");
-  } else {
+  let breakCount = wBreakValues.includes(attacker.value) ? 2 : 1;
+  breakCount = breakCpuShields(attacker, breakCount);
+
+  if (cpuShield.length === 0 && breakCount > 0) {
     alert("直接攻撃！あなたの勝利！！");
     attacker.hasAttacked = true;
-    attacker.rest = true;
+    attacker.rest        = true;
     gameOver = true;
     closePanels();
     render();
@@ -739,15 +950,308 @@ document.getElementById("btn-attack").onclick = () => {
   }
 
   attacker.hasAttacked = true;
-  attacker.rest = true;
+  attacker.rest        = true;
+
   closePanels();
   render();
 };
 
-document.getElementById("btn-attack-cancel").onclick = closePanels;
+/* ---------------------------------------------------------
+   召喚時効果（5 / 6 / 10 / Joker）
+--------------------------------------------------------- */
+function triggerOnSummon(card, isCPU) {
+
+  // Joker 召喚時：全バトル破壊（自分のジョーカーだけ残す）
+  if (jokerValues.includes(card.value)) {
+
+    const newBattle = [];
+    battle.forEach(c => {
+      if (!isCPU && c === card) newBattle.push(c);
+      else grave.push(c);
+    });
+    battle = newBattle;
+
+    const newCpuBattle = [];
+    cpuBattle.forEach(c => {
+      if (isCPU && c === card) newCpuBattle.push(c);
+      else cpuGrave.push(c);
+    });
+    cpuBattle = newCpuBattle;
+
+    logCPU(`✨ ${isCPU ? "CPUの" : "あなたの"}ジョーカー召喚時効果：全バトルゾーン破壊！`);
+    render();
+  }
+
+  // 5：マナブースト
+  if (card.value === "5") {
+    if (!isCPU) {
+      if (deck.length > 0) {
+        mana.push(deck.shift());
+        logCPU(`✨ あなたの ${cardName(card)}：マナ+1`);
+      }
+    } else {
+      if (cpuDeck.length > 0) {
+        cpuMana.push(cpuDeck.shift());
+        logCPU(`✨ CPUの ${cardName(card)}：マナ+1`);
+      }
+    }
+    render();
+  }
+
+  // 6：ドロー
+  if (card.value === "6") {
+    if (!isCPU) {
+      if (deck.length > 0) {
+        const d = deck.shift();
+        hand.push(d);
+        logCPU(`✨ あなたの ${cardName(card)}：1ドロー`);
+      }
+    } else {
+      if (cpuDeck.length > 0) {
+        const d = cpuDeck.shift();
+        cpuHand.push(d);
+        logCPU(`✨ CPUの ${cardName(card)}：1ドロー`);
+      }
+    }
+    render();
+  }
+
+  // 10：ハンデス
+  if (card.value === "10") {
+    if (!isCPU) {
+      if (cpuHand.length > 0) {
+        const idx = Math.floor(Math.random() * cpuHand.length);
+        const removed = cpuHand.splice(idx, 1)[0];
+        cpuGrave.push(removed);
+        logCPU(`✨ あなたの ${cardName(card)}：CPU手札を1枚墓地へ`);
+      }
+    } else {
+      if (hand.length > 0) {
+        const idx = Math.floor(Math.random() * hand.length);
+        const removed = hand.splice(idx, 1)[0];
+        grave.push(removed);
+        logCPU(`✨ CPUの ${cardName(card)}：あなたの手札1枚を墓地へ`);
+      }
+    }
+    render();
+  }
+
+  // K：召喚時、山札の上から1枚シールドに追加
+if (card.value === "K") {
+    if (!isCPU) {
+        if (deck.length > 0) {
+            const top = deck.shift();
+            shield.push(top); // シールドに追加（裏向き扱い）
+            logCPU(`✨ あなたの ${cardName(card)} の効果！ シールド+1`);
+        } else {
+            logCPU(`✨ ${cardName(card)} の効果：山札がないため不発`);
+        }
+    } else {
+        if (cpuDeck.length > 0) {
+            const top = cpuDeck.shift();
+            cpuShield.push(top);
+            logCPU(`✨ CPUの ${cardName(card)} の効果！ シールド+1`);
+        } else {
+            logCPU(`✨ CPUの ${cardName(card)} の効果：山札なし不発`);
+        }
+    }
+    render();
+}
+
+}
 
 /* ---------------------------------------------------------
-   ヘルパー
+   呪文（A / 9）
+--------------------------------------------------------- */
+function playSpell(card, isCPU) {
+
+  // A：単体破壊
+  if (card.value === "A") {
+    if (!isCPU) {
+      if (cpuBattle.length === 0) {
+        logCPU("A：相手場にカードなし（不発）");
+      } else {
+        const listText = cpuBattle
+          .map((c, i) => `${i+1}: ${cardName(c)}（コスト${c.cost}）`)
+          .join("\n");
+        const sel = prompt("破壊する相手クリーチャー番号:\n" + listText);
+        const n = parseInt(sel, 10);
+        if (!isNaN(n) && n >= 1 && n <= cpuBattle.length) {
+          const target = cpuBattle.splice(n-1, 1)[0];
+          cpuGrave.push(target);
+          logCPU(`A：CPUの ${cardName(target)} を破壊！`);
+        }
+      }
+
+    } else {
+      if (battle.length === 0) {
+        logCPU("CPUのA：あなたの場が空（不発）");
+      } else {
+        const sorted = [...battle].sort((a, b) => getPower(b) - getPower(a));
+        const target = sorted[0];
+        grave.push(target);
+        battle.splice(battle.indexOf(target), 1);
+        logCPU(`CPUのA：あなたの ${cardName(target)} を破壊！`);
+      }
+    }
+  }
+
+  // 9：全レスト
+  if (card.value === "9") {
+    if (!isCPU) {
+      cpuBattle.forEach(c => c.rest = true);
+      logCPU("9：CPUのバトルゾーンをすべてレスト！");
+    } else {
+      battle.forEach(c => c.rest = true);
+      logCPU("CPUの9：あなたのバトルゾーンをレスト！");
+    }
+  }
+
+  // 呪文は墓地へ
+  if (!isCPU) grave.push(card);
+  else cpuGrave.push(card);
+
+  render();
+}
+
+/* ---------------------------------------------------------
+   ST（プレイヤー）
+--------------------------------------------------------- */
+function handlePlayerShieldTrigger(card) {
+  const use = confirm(`シールドトリガー発動: ${cardName(card)} を使いますか？`);
+  if (use) {
+    logCPU(`✨ ST発動！ ${cardName(card)}`);
+
+    if (card.value === "A" || card.value === "9") {
+      playSpell(card, false);
+    } else if (jokerValues.includes(card.value)) {
+      const summoned = {
+        ...card,
+        summoningSick: false,
+        hasAttacked: false,
+        hasBlocked: false,
+        rest: false
+      };
+      battle.push(summoned);
+      triggerOnSummon(summoned, false);
+      render();
+    } else {
+      battle.push({
+        ...card,
+        summoningSick: false,
+        hasAttacked: false,
+        hasBlocked: false,
+        rest: false
+      });
+      render();
+    }
+
+  } else {
+    hand.push(card);
+    logCPU(`ST を温存：${cardName(card)} を手札へ`);
+  }
+}
+
+/* ---------------------------------------------------------
+   ST（CPU）
+--------------------------------------------------------- */
+function shouldCpuUseShieldTrigger(card) {
+  const cpuField    = cpuBattle.length;
+  const playerField = battle.length;
+
+  if (cpuField <= 1 && playerField >= 3) return true;
+  if (cpuField >= 3 && playerField <= 1) return false;
+  return Math.random() < 0.5;
+}
+
+function handleCpuShieldTrigger(card) {
+  const use = shouldCpuUseShieldTrigger(card);
+
+  if (use) {
+    logCPU(`✨ CPUのST発動！ ${cardName(card)}`);
+
+    if (card.value === "A" || card.value === "9") {
+      playSpell(card, true);
+    } else if (jokerValues.includes(card.value)) {
+      const summoned = {
+        ...card,
+        summoningSick: false,
+        hasAttacked: false,
+        hasBlocked: false,
+        rest: false
+      };
+      cpuBattle.push(summoned);
+      triggerOnSummon(summoned, true);
+      render();
+    } else {
+      cpuBattle.push({
+        ...card,
+        summoningSick: false,
+        hasAttacked: false,
+        hasBlocked: false,
+        rest: false
+      });
+      render();
+    }
+
+  } else {
+    cpuHand.push(card);
+    logCPU(`CPUはSTを温存：${cardName(card)} を手札へ`);
+  }
+}
+
+/* ---------------------------------------------------------
+   シールドブレイク（プレイヤー→CPU）
+--------------------------------------------------------- */
+function breakCpuShields(attacker, breakCount) {
+  while (breakCount > 0 && cpuShield.length > 0) {
+    const broken = cpuShield.shift();
+
+    if (shieldTriggerValues.includes(broken.value)) {
+      handleCpuShieldTrigger(broken);
+    } else {
+      cpuGrave.push(broken);
+    }
+
+    const cpuShieldZone = document.getElementById("cpu-shield-zone");
+    if (cpuShieldZone) {
+      cpuShieldZone.classList.add("break");
+      setTimeout(() => cpuShieldZone.classList.remove("break"), 500);
+    }
+
+    logCPU(`💥 あなたの ${cardName(attacker)} が CPU シールドをブレイク！`);
+    breakCount--;
+  }
+  return breakCount;
+}
+
+/* ---------------------------------------------------------
+   シールドブレイク（CPU→プレイヤー）
+--------------------------------------------------------- */
+function breakPlayerShields(attacker, breakCount) {
+  while (breakCount > 0 && shield.length > 0) {
+    const broken = shield.shift();
+
+    if (shieldTriggerValues.includes(broken.value)) {
+      handlePlayerShieldTrigger(broken);
+    } else {
+      grave.push(broken);
+    }
+
+    const shieldZone = document.getElementById("shield-zone");
+    if (shieldZone) {
+      shieldZone.classList.add("break");
+      setTimeout(() => shieldZone.classList.remove("break"), 500);
+    }
+
+    logCPU(`💥 CPUの ${cardName(attacker)} がシールドをブレイク！`);
+    breakCount--;
+  }
+  return breakCount;
+}
+
+/* ---------------------------------------------------------
+   ログヘルパー
 --------------------------------------------------------- */
 function logCPU(msg) {
   const div = document.createElement("div");
@@ -761,6 +1265,6 @@ function cardName(c) {
 }
 
 /* ---------------------------------------------------------
-   ゲームスタート
+   ゲーム開始
 --------------------------------------------------------- */
 startGame();
