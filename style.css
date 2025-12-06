@@ -1,0 +1,269 @@
+/* 全体基本 */
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: sans-serif;
+  background: #f0f0f0;
+  margin: 0;
+  padding: 10px;
+}
+
+h1 {
+  margin: 5px 0 10px;
+  text-align: center;
+}
+
+.hidden {
+  display: none;
+}
+
+/* レイアウト：左にボード、右に操作系 */
+
+.layout {
+  display: flex;
+  justify-content: center;
+  align-items: stretch;
+  gap: 12px;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+/* ===================== ボード（フィールド全体） ===================== */
+
+#board {
+  position: relative;
+  flex: 1;
+  min-width: 900px;
+  max-width: 1100px;
+  height: 650px;
+  background: #faf6e9;
+  border: 3px solid #c8b9a1;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+/* 中央の区切り線（相手/自分フィールド） */
+
+#mid-line {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 100%;
+  border-top: 2px dashed #b0a090;
+  pointer-events: none;
+}
+
+/* ===================== ゾーン共通 ===================== */
+
+.hand-zone,
+.battle-zone,
+.shield-zone {
+  position: absolute;
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  width: 70%;
+  left: 50%;
+  transform: translateX(-50%);
+  min-height: 120px;
+}
+
+/* 上下で位置を分ける */
+.cpu-side.hand-zone   { top: 10px; }
+.cpu-side.battle-zone { top: 190px; }
+.cpu-side.shield-zone { top: 250px; }
+
+.player-side.hand-zone   { bottom: 10px; }
+.player-side.battle-zone { bottom: 190px; }
+.player-side.shield-zone { bottom: 250px; }
+
+/* カード基本 */
+
+.card {
+  width: 70px;
+  height: 100px;
+  position: relative;
+  margin: 0 -22px; /* 扇の重なり具合 */
+  transition: transform 0.15s;
+}
+
+.card-img {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* レスト状態（横向き） */
+.card.rest {
+  transform: rotate(90deg) !important;
+  transform-origin: center center;
+}
+
+.selected {
+  outline: 3px solid #ff4c4c;
+}
+
+/* ブロッカーバッジ */
+
+.blocker-badge {
+  position: absolute;
+  top: 0;
+  left: 0;
+  background: rgba(0, 80, 200, 0.9);
+  color: #fff;
+  padding: 1px 4px;
+  font-size: 11px;
+  border-radius: 0 0 5px 0;
+}
+
+/* 手札扇形：上側と下側で少し角度変える */
+
+#hand-zone .card,
+#cpu-hand-zone .card {
+  transform-origin: bottom center;
+}
+
+/* 扇状配置は JS の arrangeHandFan で角度調整する前提 */
+
+/* ===================== 山札 / 捨て札 / エネルギー ===================== */
+
+.deck-zone,
+.grave-zone,
+.energy-box {
+  position: absolute;
+}
+
+/* CPU側（上） */
+
+#cpu-deck-zone {
+  top: 220px;     /* 上フィールド左寄り */
+  left: 40px;
+}
+
+#cpu-grave-zone {
+  top: 220px;     /* 上フィールド右寄り */
+  right: 40px;
+}
+
+#cpu-energy {
+  top: 20px;
+  left: 40px;
+}
+
+/* プレイヤー側（下） */
+
+#player-deck-zone {
+  bottom: 220px;
+  left: 40px;
+}
+
+#player-grave-zone {
+  bottom: 220px;
+  right: 40px;
+}
+
+#player-energy {
+  bottom: 20px;
+  left: 40px;
+}
+
+/* 山札/捨て札に入るカード画像のサイズ */
+
+.deck-zone img,
+.grave-zone img {
+  width: 70px;
+  height: 100px;
+  display: block;
+}
+
+/* 山札・捨て札の枚数オーバーレイ */
+
+.deck-count {
+  position: absolute;
+  bottom: -18px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 12px;
+  font-weight: bold;
+  color: #333;
+}
+
+/* エネルギー表示 */
+
+.energy-box {
+  width: 90px;
+  height: 70px;
+  border-radius: 8px;
+  border: 2px solid #c05050;
+  background: #fff;
+  padding: 4px;
+  font-size: 13px;
+  line-height: 1.3;
+  text-align: center;
+}
+
+/* ===================== サイドパネル（右） ===================== */
+
+#side-panel {
+  width: 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+#turn-number {
+  font-size: 18px;
+  font-weight: bold;
+  padding: 4px;
+  text-align: center;
+  border-radius: 6px;
+  background: #fff;
+  border: 1px solid #ccc;
+}
+
+.log-box {
+  height: 260px;          /* ★ 好きな高さに固定（例：260px） */
+  overflow-y: scroll;     /* ★ 常にスクロールバー表示 */
+  background: #f5f5f5;
+  border: 1px solid #aaa;
+  padding: 6px;
+  font-size: 12px;
+  text-align: left;
+}
+
+.block-list {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  margin: 6px 0;
+}
+
+
+
+.main-button {
+  padding: 8px;
+  margin-top: 4px;
+}
+
+/* 各種パネル（ターン開始 / 攻撃 / 行動 / ブロック確認） */
+
+.panel {
+  background: #fff;
+  border: 2px solid #333;
+  border-radius: 8px;
+  padding: 8px;
+  font-size: 14px;
+}
+
+.panel button {
+  margin: 3px;
+}
+
+/* ===================== その他 ===================== */
+
+button {
+  cursor: pointer;
+}

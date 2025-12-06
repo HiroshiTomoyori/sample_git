@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>デュエマ風トランプゲーム</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <h1>デュエマ風トランプバトル</h1>
+
+  <div class="layout">
+    <!-- ===================== ボード（フィールド全体） ===================== -->
+    <div id="board">
+      <!-- 中央の境界線 -->
+      <div id="mid-line"></div>
+
+      <!-- ===== CPU 側（上半分） ===== -->
+
+      <!-- CPU エネルギー -->
+      <div id="cpu-energy" class="energy-box">
+        エネルギー<br>0 / 0
+      </div>
+
+      <!-- CPU 山札 -->
+      <div id="cpu-deck-zone" class="deck-zone"></div>
+
+      <!-- CPU 捨て札 -->
+      <div id="cpu-grave-zone" class="grave-zone"></div>
+
+      <!-- CPU シールド（上段、裏向き） -->
+      <div id="cpu-shield-zone" class="shield-zone cpu-side"></div>
+
+      <!-- CPU フィールド（バトルゾーン） -->
+      <div id="cpu-battle-zone" class="battle-zone cpu-side"></div>
+
+      <!-- CPU 手札（大きく扇状） -->
+      <div id="cpu-hand-zone" class="hand-zone cpu-side"></div>
+
+      <!-- ===== プレイヤー側（下半分） ===== -->
+
+      <!-- プレイヤー エネルギー -->
+      <div id="player-energy" class="energy-box player-side">
+        エネルギー<br>0 / 0
+      </div>
+
+      <!-- プレイヤー 山札 -->
+      <div id="player-deck-zone" class="deck-zone player-side"></div>
+
+      <!-- プレイヤー 捨て札 -->
+      <div id="player-grave-zone" class="grave-zone player-side"></div>
+
+      <!-- プレイヤー シールド -->
+      <div id="shield-zone" class="shield-zone player-side"></div>
+
+      <!-- プレイヤー フィールド（バトルゾーン） -->
+      <div id="battle-zone" class="battle-zone player-side"></div>
+
+      <!-- プレイヤー 手札（扇状） -->
+      <div id="hand-zone" class="hand-zone player-side"></div>
+    </div>
+
+    <!-- ===================== 右サイドパネル（ログ・ボタン類） ===================== -->
+    <div id="side-panel">
+      <div id="turn-number">ターン: 1</div>
+
+      <div id="cpu-log" class="log-box"></div>
+
+      <button id="end-turn-btn" class="main-button">ターン終了</button>
+
+      <!-- プレイヤーターン開始パネル -->
+      <div id="player-turn-panel" class="panel hidden">
+        <div>あなたのターン開始！</div>
+        <button id="btn-player-start">OK</button>
+      </div>
+
+      <!-- CPUターン開始パネル -->
+      <div id="cpu-turn-panel" class="panel hidden">
+        <div>CPUのターン開始！</div>
+        <button id="btn-cpu-start">OK</button>
+      </div>
+
+
+      <div id="block-select-panel" class="panel hidden">
+       <div>ブロックに使うクリーチャーを選んでください</div>
+  <div id="block-select-list" class="block-list"></div>
+  <button id="block-select-cancel">ブロックしない</button>
+</div>
+
+      <!-- 攻撃パネル -->
+      <div id="attack-panel" class="panel hidden">
+        <div>攻撃しますか？</div>
+        <button id="btn-attack">攻撃</button>
+        <button id="btn-attack-cancel">キャンセル</button>
+      </div>
+
+      <!-- 手札行動パネル -->
+      <div id="action-panel" class="panel hidden">
+        <div>行動選択</div>
+        <button id="btn-mana">エネルギーに置く</button>
+        <button id="btn-summon">召喚する</button>
+        <button id="btn-cancel">キャンセル</button>
+      </div>
+
+      <!-- ブロック確認パネル -->
+      <div id="block-confirm-panel" class="panel hidden">
+        <div id="block-message"></div>
+        <button id="btn-block-yes">ブロックする</button>
+        <button id="btn-block-no">しない</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>
