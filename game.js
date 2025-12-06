@@ -707,19 +707,31 @@ function renderZone(id, cards, zoneType) {
       div.appendChild(bd);
     }
 
-    // ========= 手札クリック → アクションパネル =========
-    if (zoneType === "player-hand" && isPlayerTurn && !gameOver) {
-      div.onclick = () => {
-        if (gameOver) return;
+// 手札クリック → アクションパネル表示
+if (zoneType === "player-hand" && isPlayerTurn && !gameOver) {
+  div.onclick = () => {
+    if (gameOver) return;
 
-        document.querySelectorAll("#hand-zone .card")
-          .forEach(x => x.classList.remove("selected"));
-        div.classList.add("selected");
+    document.querySelectorAll("#hand-zone .card")
+      .forEach(x => x.classList.remove("selected"));
+    div.classList.add("selected");
 
-        selectedHandIndex = index;
-        document.getElementById("action-panel").classList.remove("hidden");
-      };
+    selectedHandIndex = index;
+
+    const panel = document.getElementById("action-panel");
+    const summonBtn = document.getElementById("btn-summon");
+
+    // ★ スペルなら「使用」、クリーチャーなら「召喚」
+    if (["A","9"].includes(c.value)) {
+      summonBtn.textContent = "使用";
+    } else {
+      summonBtn.textContent = "召喚";
     }
+
+    panel.classList.remove("hidden");
+  };
+}
+
 
     // ========= バトルカードクリック → 攻撃パネル =========
     if (zoneType === "player-battle" && isPlayerTurn && !gameOver) {

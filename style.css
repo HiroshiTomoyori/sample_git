@@ -109,15 +109,18 @@ h1 {
 /* ブロッカーバッジ */
 
 .blocker-badge {
-  position: absolute;
-  top: 0;
-  left: 0;
-  background: rgba(0, 80, 200, 0.9);
-  color: #fff;
-  padding: 1px 4px;
-  font-size: 11px;
-  border-radius: 0 0 5px 0;
+    position: absolute;
+    bottom: 3px;     /* ★ 左下に移動 */
+    left: 3px;       /* ★ 左下に移動 */
+    background-color: gold;
+    color: black;
+    font-weight: bold;
+    padding: 2px 4px;
+    border-radius: 4px;
+    font-size: 12px;
+    z-index: 5;
 }
+
 
 /* 手札扇形：上側と下側で少し角度変える */
 
