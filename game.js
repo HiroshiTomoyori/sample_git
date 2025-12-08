@@ -1,14 +1,11 @@
 /* =========================================================
    デュエマ風トランプゲーム 完全版 game.js
-   （ST＋JOKER＋J特例バトル対応）
-
-   ▼カード能力まとめ
    - 5：召喚時 山札の上から1枚マナへ
    - 6：召喚時 1ドロー
    - 7：スピードアタッカー
    - 10：召喚時 相手手札ランダム1枚墓地へ（ハンデス）
-   - A：呪文(4) 相手バトル1体破壊
-   - 9：呪文(9) 相手バトル全てレスト
+   - A：スペル(4) 相手バトル1体破壊
+   - 9：スペル(9) 相手バトル全てレスト
    - Q(12), K(13)：Wブレイカー
    - J：特例バトル
        Q, K には勝利
@@ -16,11 +13,17 @@
    - JOKER(JK1,JK2)：コスト13 / ブロッカー / スピードアタッカー / ST
        召喚時：全バトルゾーンのカードを墓地へ（自分のジョーカーだけ残る）
        バトル特例：3,4,J に必ず負ける
+   - K：通常召喚時 山札の上から1枚自分シールドへ
+        ＋ 特殊召喚（進化）：
+          自分バトルに 7/8/10 がいる時、
+          追加コスト(13 - そのカードのコスト)を支払い、
+          そのカードの上に K を重ねて召喚（召喚酔いなし）
    - ブロック：1体につき1ターン1回
-   - アンタップ：自分ターン開始時のみ
+                 ＋ タップ(rest=true)状態はブロック不可
+   - アンタップ：各プレイヤーの自分ターン開始時のみ
    - ST：A,2,8,9,Q,JK1,JK2
-       プレイヤー → confirm で発動するか選択（発動しないなら手札へ）
-       CPU → Zロジックで自動判断
+       プレイヤー → 発動するか選択
+       CPU → 簡易ロジック
 ========================================================= */
 
 const suits  = ["s","h","d","k"];
@@ -28,9 +31,9 @@ const values = ["A","2","3","4","5","6","7","8","9","10","J","Q","K"];
 
 const blockerValues         = ["2","3","4","8","J","K"];
 const blockerNoAttackValues = ["2","3","8"];
-const speedAttackerValues   = ["7","K","JK1","JK2"]; // Joker も召喚酔いしない
+const speedAttackerValues   = ["7","K","JK1","JK2"];
 const wBreakValues          = ["Q","K"];
-const shieldTriggerValues   = ["A","2","8","9","Q","JK1","JK2"]; // ST 対象
+const shieldTriggerValues   = ["A","2","8","9","Q","JK1","JK2"];
 const jokerValues           = ["JK1","JK2"];
 
 // ゾーン
@@ -72,9 +75,9 @@ const cpuLog = document.getElementById("cpu-log");
    コスト / パワー
 --------------------------------------------------------- */
 function getCost(v) {
-  if (v === "A") return 4;   // 呪文A
-  if (v === "9") return 9;   // 呪文9
-  if (v === "JK1" || v === "JK2") return 13; // Joker
+  if (v === "A") return 4;
+  if (v === "9") return 9;
+  if (v === "JK1" || v === "JK2") return 13;
   if (v === "J") return 11;
   if (v === "Q") return 12;
   if (v === "K") return 13;
@@ -92,7 +95,6 @@ function createDeck() {
   deck = [];
   cpuDeck = [];
 
-  // 通常カード
   suits.forEach(s => {
     values.forEach(v => {
       const c = {
@@ -107,7 +109,7 @@ function createDeck() {
     });
   });
 
-  // Joker 2枚（JK1, JK2）
+  // Joker 2枚
   const jokers = [
     { suit: "j", value: "JK1", img: "j01.png" },
     { suit: "j", value: "JK2", img: "j02.png" }
@@ -178,7 +180,7 @@ function startGame() {
 }
 
 /* ---------------------------------------------------------
-   ターン開始（自分側だけアンタップ）
+   ターン開始
 --------------------------------------------------------- */
 function startTurn() {
   document.getElementById("turn-number").textContent = `ターン: ${turn}`;
@@ -261,7 +263,7 @@ function cpuAction() {
     logCPU(`CPUが ${cardName(c)} をマナに置いた`);
   }
 
-  // 呪文使用 or 召喚（高コスト優先）
+  // 呪文 or 召喚
   while (true) {
     const usable = cpuMana.length - cpuUsedEnergy;
     const candidates = cpuHand.filter(c => c.cost <= usable);
@@ -270,7 +272,7 @@ function cpuAction() {
     candidates.sort((a, b) => b.cost - a.cost);
     const chosen = candidates[0];
 
-    // 呪文 A / 9
+    // スペル
     if (chosen.value === "A" || chosen.value === "9") {
       cpuUsedEnergy += chosen.cost;
       playSpell(chosen, true);
@@ -278,7 +280,7 @@ function cpuAction() {
       continue;
     }
 
-    // クリーチャー召喚（Joker含む）
+    // クリーチャー
     cpuUsedEnergy += chosen.cost;
     const summoned = {
       ...chosen,
@@ -291,7 +293,6 @@ function cpuAction() {
     cpuHand.splice(cpuHand.indexOf(chosen), 1);
 
     logCPU(`CPUが ${cardName(chosen)} を召喚（コスト ${chosen.cost}）`);
-
     triggerOnSummon(summoned, true);
   }
 
@@ -314,7 +315,7 @@ function cpuAction() {
 }
 
 /* ---------------------------------------------------------
-   CPU攻撃キュー処理
+   CPU攻撃キュー
 --------------------------------------------------------- */
 function startNextCpuAttack() {
   if (gameOver) return;
@@ -336,7 +337,7 @@ function startNextCpuAttack() {
 }
 
 /* ---------------------------------------------------------
-   CPU攻撃処理（1体分）
+   CPU 攻撃1回分
 --------------------------------------------------------- */
 function cpuAttack() {
   const attacker = currentCpuAttacker;
@@ -358,17 +359,16 @@ function cpuAttack() {
     return;
   }
 
-  // プレイヤーブロッカー
-// ★ タップしているカードはブロック不可
-const playerBlockers = battle.filter(
-  c => c.blocker && !c.hasBlocked && !c.rest
-);
+  // プレイヤーブロッカー（タップしてないやつだけ）
+  const playerBlockers = battle.filter(
+    c => c.blocker && !c.hasBlocked && !c.rest
+  );
   if (playerBlockers.length > 0) {
     openPlayerBlockPanel(attacker, playerBlockers);
     return;
   }
 
-  // Wブレイカー効果
+  // シールドブレイク
   let breakCount = wBreakValues.includes(attacker.value) ? 2 : 1;
   breakCount = breakPlayerShields(attacker, breakCount);
 
@@ -393,7 +393,7 @@ function finishCpuAttack() {
 }
 
 /* ---------------------------------------------------------
-   CPU 防御側ブロッカー選択（賢く選ぶ）
+   CPU 防御側ブロッカー選択
 --------------------------------------------------------- */
 function chooseCpuBlocker(attacker, blockers) {
   const ap = getPower(attacker);
@@ -409,7 +409,7 @@ function chooseCpuBlocker(attacker, blockers) {
 }
 
 /* ---------------------------------------------------------
-   プレイヤーのブロック選択 UI
+   プレイヤー ブロック選択 UI
 --------------------------------------------------------- */
 function openPlayerBlockPanel(attacker, blockers) {
   const panel = document.getElementById("block-select-panel");
@@ -478,15 +478,13 @@ function openPlayerBlockPanel(attacker, blockers) {
 }
 
 /* ---------------------------------------------------------
-   バトル処理（ブロック時バトル）★J特例・JOKER特例あり
+   バトル（ブロック時） Joker / J 特例付き
 --------------------------------------------------------- */
 function battleCards(attacker, defender, defenderIndex, isCPUDefender) {
   const ap = getPower(attacker);
   const dp = getPower(defender);
 
-  /* -----------------------------------------
-     ▼ Joker 特例：3,4,J に必ず負ける
-  ----------------------------------------- */
+  // Joker 特例：3,4,J に必ず負ける
   if (jokerValues.includes(attacker.value) &&
       ["3","4","J"].includes(defender.value)) {
 
@@ -519,18 +517,11 @@ function battleCards(attacker, defender, defenderIndex, isCPUDefender) {
     return;
   }
 
-  /* -----------------------------------------
-     ▼ J（ジャック）の特例ルール
-       - J は Q/K に勝つ
-       - J は 7/8/10 に負ける
-  ----------------------------------------- */
-
-  // 攻撃側 J
+  // J 特例：Q,K に勝利
+  //         7,8,10 に敗北
   if (attacker.value === "J") {
-    // J が Q, K に勝つ
     if (["Q","K"].includes(defender.value)) {
       logCPU(`⚡ 特例：${cardName(attacker)} は ${cardName(defender)} に勝利！`);
-
       if (isCPUDefender) {
         cpuGrave.push(defender);
         cpuBattle.splice(defenderIndex, 1);
@@ -541,11 +532,8 @@ function battleCards(attacker, defender, defenderIndex, isCPUDefender) {
       render();
       return;
     }
-
-    // J が 7,8,10 に負ける
     if (["7","8","10"].includes(defender.value)) {
       logCPU(`☠ 特例：${cardName(attacker)} は ${cardName(defender)} に敗北！`);
-
       if (isCPUDefender) {
         grave.push(attacker);
         battle.splice(battle.indexOf(attacker), 1);
@@ -558,12 +546,9 @@ function battleCards(attacker, defender, defenderIndex, isCPUDefender) {
     }
   }
 
-  // 防御側 J
   if (defender.value === "J") {
-    // J が Q, K に勝つ（防御側 J）
     if (["Q","K"].includes(attacker.value)) {
       logCPU(`⚡ 特例：${cardName(defender)} は ${cardName(attacker)} に勝利！`);
-
       if (isCPUDefender) {
         grave.push(attacker);
         battle.splice(battle.indexOf(attacker), 1);
@@ -574,11 +559,8 @@ function battleCards(attacker, defender, defenderIndex, isCPUDefender) {
       render();
       return;
     }
-
-    // J が 7,8,10 に負ける
     if (["7","8","10"].includes(attacker.value)) {
       logCPU(`☠ 特例：${cardName(defender)} は ${cardName(attacker)} に敗北！`);
-
       if (isCPUDefender) {
         cpuGrave.push(defender);
         cpuBattle.splice(defenderIndex, 1);
@@ -591,10 +573,7 @@ function battleCards(attacker, defender, defenderIndex, isCPUDefender) {
     }
   }
 
-  /* -----------------------------------------
-     ▼ 通常バトル（パワー勝負）
-  ----------------------------------------- */
-
+  // 通常バトル
   logCPU(`🛡 ${cardName(defender)} が ${cardName(attacker)} をブロック！`);
 
   if (ap > dp) {
@@ -605,7 +584,6 @@ function battleCards(attacker, defender, defenderIndex, isCPUDefender) {
       grave.push(defender);
       battle.splice(defenderIndex, 1);
     }
-
     logCPU(`💥 ${cardName(attacker)} が ${cardName(defender)} を倒した！`);
     alert(`${cardName(attacker)} が ${cardName(defender)} を倒した！`);
 
@@ -617,7 +595,6 @@ function battleCards(attacker, defender, defenderIndex, isCPUDefender) {
       cpuGrave.push(attacker);
       cpuBattle.splice(cpuBattle.indexOf(attacker), 1);
     }
-
     logCPU(`☠ ${cardName(attacker)} はブロックされて倒された…`);
     alert(`${cardName(attacker)} はブロックされて倒された…`);
 
@@ -633,7 +610,6 @@ function battleCards(attacker, defender, defenderIndex, isCPUDefender) {
       cpuGrave.push(attacker);
       cpuBattle.splice(cpuBattle.indexOf(attacker), 1);
     }
-
     logCPU("⚡ 相打ち！");
     alert("相打ち！");
   }
@@ -642,7 +618,7 @@ function battleCards(attacker, defender, defenderIndex, isCPUDefender) {
 }
 
 /* ---------------------------------------------------------
-   カード画像
+   画像
 --------------------------------------------------------- */
 function getCardImagePath(card) {
   if (card.value === "JK1") return "imgs/j01.png";
@@ -660,7 +636,7 @@ function valueToNumber(v) {
 }
 
 /* ---------------------------------------------------------
-   描画（ゾーン共通）
+   描画
 --------------------------------------------------------- */
 function render() {
   renderZone("hand-zone", hand, "player-hand");
@@ -707,33 +683,45 @@ function renderZone(id, cards, zoneType) {
       div.appendChild(bd);
     }
 
-// 手札クリック → アクションパネル表示
-if (zoneType === "player-hand" && isPlayerTurn && !gameOver) {
-  div.onclick = () => {
-    if (gameOver) return;
+    // 手札クリック
+    if (zoneType === "player-hand" && isPlayerTurn && !gameOver) {
+      div.onclick = () => {
+        if (gameOver) return;
 
-    document.querySelectorAll("#hand-zone .card")
-      .forEach(x => x.classList.remove("selected"));
-    div.classList.add("selected");
+        document.querySelectorAll("#hand-zone .card")
+          .forEach(x => x.classList.remove("selected"));
+        div.classList.add("selected");
 
-    selectedHandIndex = index;
+        selectedHandIndex = index;
+        const panel = document.getElementById("action-panel");
+        const summonBtn = document.getElementById("btn-summon");
+        const evoBtn    = document.getElementById("btn-evolve-summon");
 
-    const panel = document.getElementById("action-panel");
-    const summonBtn = document.getElementById("btn-summon");
+        // スペルなら「使用」、それ以外は「召喚」
+        if (summonBtn) {
+          if (["A","9"].includes(c.value)) {
+            summonBtn.textContent = "使用";
+          } else {
+            summonBtn.textContent = "召喚";
+          }
+        }
 
-    // ★ スペルなら「使用」、クリーチャーなら「召喚」
-    if (["A","9"].includes(c.value)) {
-      summonBtn.textContent = "使用";
-    } else {
-      summonBtn.textContent = "召喚";
+        // K の場合だけ特殊召喚ボタン（進化）判定
+        if (evoBtn) {
+          if (c.value === "K") {
+            const evoTargets = battle.filter(x => ["7","8","10"].includes(x.value));
+            if (evoTargets.length > 0) evoBtn.classList.remove("hidden");
+            else                       evoBtn.classList.add("hidden");
+          } else {
+            evoBtn.classList.add("hidden");
+          }
+        }
+
+        panel.classList.remove("hidden");
+      };
     }
 
-    panel.classList.remove("hidden");
-  };
-}
-
-
-    // ========= バトルカードクリック → 攻撃パネル =========
+    // バトルゾーンクリック → 攻撃
     if (zoneType === "player-battle" && isPlayerTurn && !gameOver) {
       div.onclick = () => {
         if (gameOver) return;
@@ -788,7 +776,7 @@ function arrangeHandFan(id) {
 }
 
 /* ---------------------------------------------------------
-   山札・墓地表示
+   山札・墓地
 --------------------------------------------------------- */
 function renderDeckAndGrave() {
   document.getElementById("player-deck-zone").innerHTML = `
@@ -851,7 +839,7 @@ document.getElementById("btn-summon").onclick = () => {
     return;
   }
 
-  // 呪文（A / 9）
+  // スペル
   if (c.value === "A" || c.value === "9") {
     playerUsedEnergy += c.cost;
     playSpell(c, false);
@@ -861,7 +849,7 @@ document.getElementById("btn-summon").onclick = () => {
     return;
   }
 
-  // 召喚
+  // 通常召喚
   playerUsedEnergy += c.cost;
   const summoned = {
     ...c,
@@ -885,12 +873,71 @@ function closePanels() {
   document.getElementById("attack-panel").classList.add("hidden");
   document.getElementById("block-select-panel").classList.add("hidden");
 
+  const evoBtn = document.getElementById("btn-evolve-summon");
+  if (evoBtn) evoBtn.classList.add("hidden");
+
   selectedHandIndex   = null;
   selectedBattleIndex = null;
 
   document
     .querySelectorAll("#hand-zone .card, #battle-zone .card")
     .forEach(x => x.classList.remove("selected"));
+}
+
+/* ---------------------------------------------------------
+   K 特殊召喚（進化召喚）
+--------------------------------------------------------- */
+const evoBtn = document.getElementById("btn-evolve-summon");
+if (evoBtn) {
+  evoBtn.onclick = () => {
+    if (gameOver) return;
+    const card = hand[selectedHandIndex];
+    if (!card || card.value !== "K") return;
+
+    const evoTargets = battle.filter(x => ["7","8","10"].includes(x.value));
+    if (evoTargets.length === 0) {
+      alert("進化元（7,8,10）が場にありません");
+      return;
+    }
+
+    const listText = evoTargets
+      .map((c, i) => `${i+1}: ${cardName(c)}（コスト${c.cost}）`)
+      .join("\n");
+    const sel = prompt("重ねるカードを選んでください:\n" + listText);
+    const n = parseInt(sel, 10);
+    if (isNaN(n) || n < 1 || n > evoTargets.length) return;
+
+    const baseCard = evoTargets[n - 1];
+    const extraCost = 13 - baseCard.cost;
+    const usable = mana.length - playerUsedEnergy;
+
+    if (usable < extraCost) {
+      alert(`エネルギー不足（必要${extraCost} / 残り${usable}）`);
+      return;
+    }
+
+    playerUsedEnergy += extraCost;
+
+    const idx = battle.indexOf(baseCard);
+    battle.splice(idx, 1);
+
+    const evoK = {
+      ...card,
+      summoningSick: false, // 特殊召喚は召喚酔いなし
+      hasAttacked: false,
+      hasBlocked: false,
+      rest: false
+    };
+    battle.splice(idx, 0, evoK);
+
+    hand.splice(selectedHandIndex, 1);
+
+    logCPU(`✨ Kの特殊召喚！ ${cardName(baseCard)} に重ねて登場（追加コスト:${extraCost}）`);
+    triggerOnSummon(evoK, false);
+
+    closePanels();
+    render();
+  };
 }
 
 /* ---------------------------------------------------------
@@ -925,10 +972,9 @@ document.getElementById("btn-attack").onclick = () => {
     setTimeout(() => attackerEl.classList.remove("attack-flash"), 400);
   }
 
-// ★ タップしているカードはブロック不可
-const cpuBlockers = cpuBattle.filter(
-  c => c.blocker && !c.hasBlocked && !c.rest
-);
+  const cpuBlockers = cpuBattle.filter(
+    c => c.blocker && !c.hasBlocked && !c.rest
+  );
 
   if (cpuBlockers.length > 0) {
     const blocker = chooseCpuBlocker(attacker, cpuBlockers);
@@ -969,13 +1015,12 @@ const cpuBlockers = cpuBattle.filter(
 };
 
 /* ---------------------------------------------------------
-   召喚時効果（5 / 6 / 10 / Joker）
+   召喚時効果（5 / 6 / 10 / K / Joker）
 --------------------------------------------------------- */
 function triggerOnSummon(card, isCPU) {
 
-  // Joker 召喚時：全バトル破壊（自分のジョーカーだけ残す）
+  // Joker：全バトル破壊（自分のジョーカーのみ残す）
   if (jokerValues.includes(card.value)) {
-
     const newBattle = [];
     battle.forEach(c => {
       if (!isCPU && c === card) newBattle.push(c);
@@ -1048,62 +1093,70 @@ function triggerOnSummon(card, isCPU) {
     render();
   }
 
-  // K：召喚時、山札の上から1枚シールドに追加
-if (card.value === "K") {
+  // K：召喚時 山札の上から1枚シールドへ
+  if (card.value === "K") {
     if (!isCPU) {
-        if (deck.length > 0) {
-            const top = deck.shift();
-            shield.push(top); // シールドに追加（裏向き扱い）
-            logCPU(`✨ あなたの ${cardName(card)} の効果！ シールド+1`);
-        } else {
-            logCPU(`✨ ${cardName(card)} の効果：山札がないため不発`);
-        }
+      if (deck.length > 0) {
+        const top = deck.shift();
+        shield.push(top);
+        logCPU(`✨ あなたの ${cardName(card)}：シールド+1`);
+      } else {
+        logCPU(`✨ あなたの ${cardName(card)}：山札なしで不発`);
+      }
     } else {
-        if (cpuDeck.length > 0) {
-            const top = cpuDeck.shift();
-            cpuShield.push(top);
-            logCPU(`✨ CPUの ${cardName(card)} の効果！ シールド+1`);
-        } else {
-            logCPU(`✨ CPUの ${cardName(card)} の効果：山札なし不発`);
-        }
+      if (cpuDeck.length > 0) {
+        const top = cpuDeck.shift();
+        cpuShield.push(top);
+        logCPU(`✨ CPUの ${cardName(card)}：シールド+1`);
+      } else {
+        logCPU(`✨ CPUの ${cardName(card)}：山札なしで不発`);
+      }
     }
     render();
-}
-
+  }
 }
 
 /* ---------------------------------------------------------
-   呪文（A / 9）
+   スペル（A / 9）
 --------------------------------------------------------- */
 function playSpell(card, isCPU) {
+
+  // ログ
+  if (!isCPU) {
+    logCPU(`✨ あなたはスペル ${cardName(card)} を使用！`);
+  } else {
+    logCPU(`✨ CPUはスペル ${cardName(card)} を使用！`);
+  }
 
   // A：単体破壊
   if (card.value === "A") {
     if (!isCPU) {
       if (cpuBattle.length === 0) {
-        logCPU("A：相手場にカードなし（不発）");
+        logCPU("A：相手バトルにカードがないため不発");
       } else {
         const listText = cpuBattle
           .map((c, i) => `${i+1}: ${cardName(c)}（コスト${c.cost}）`)
           .join("\n");
-        const sel = prompt("破壊する相手クリーチャー番号:\n" + listText);
+        const sel = prompt("破壊する相手クリーチャーを番号で選択:\n" + listText);
         const n = parseInt(sel, 10);
         if (!isNaN(n) && n >= 1 && n <= cpuBattle.length) {
           const target = cpuBattle.splice(n-1, 1)[0];
           cpuGrave.push(target);
-          logCPU(`A：CPUの ${cardName(target)} を破壊！`);
+          logCPU(`A：CPUの ${cardName(target)} を破壊`);
+        } else {
+          logCPU("A の効果はキャンセルされた");
         }
       }
 
     } else {
       if (battle.length === 0) {
-        logCPU("CPUのA：あなたの場が空（不発）");
+        logCPU("CPUのA：あなたの場にクリーチャーがいないため不発");
       } else {
         const sorted = [...battle].sort((a, b) => getPower(b) - getPower(a));
         const target = sorted[0];
         grave.push(target);
         battle.splice(battle.indexOf(target), 1);
-        logCPU(`CPUのA：あなたの ${cardName(target)} を破壊！`);
+        logCPU(`CPUのA：あなたの ${cardName(target)} を破壊`);
       }
     }
   }
@@ -1112,14 +1165,13 @@ function playSpell(card, isCPU) {
   if (card.value === "9") {
     if (!isCPU) {
       cpuBattle.forEach(c => c.rest = true);
-      logCPU("9：CPUのバトルゾーンをすべてレスト！");
+      logCPU("9：CPU のバトルゾーン全てをレスト");
     } else {
       battle.forEach(c => c.rest = true);
-      logCPU("CPUの9：あなたのバトルゾーンをレスト！");
+      logCPU("CPUの9：あなたのバトルゾーン全てをレスト");
     }
   }
 
-  // 呪文は墓地へ
   if (!isCPU) grave.push(card);
   else cpuGrave.push(card);
 
@@ -1132,7 +1184,7 @@ function playSpell(card, isCPU) {
 function handlePlayerShieldTrigger(card) {
   const use = confirm(`シールドトリガー発動: ${cardName(card)} を使いますか？`);
   if (use) {
-    logCPU(`✨ ST発動！ ${cardName(card)}`);
+    logCPU(`✨ あなたのシールドトリガー発動！ ${cardName(card)}`);
 
     if (card.value === "A" || card.value === "9") {
       playSpell(card, false);
@@ -1160,7 +1212,7 @@ function handlePlayerShieldTrigger(card) {
 
   } else {
     hand.push(card);
-    logCPU(`ST を温存：${cardName(card)} を手札へ`);
+    logCPU(`ST を温存：${cardName(card)} を手札に加えた`);
   }
 }
 
@@ -1178,9 +1230,8 @@ function shouldCpuUseShieldTrigger(card) {
 
 function handleCpuShieldTrigger(card) {
   const use = shouldCpuUseShieldTrigger(card);
-
   if (use) {
-    logCPU(`✨ CPUのST発動！ ${cardName(card)}`);
+    logCPU(`✨ CPUのシールドトリガー発動！ ${cardName(card)}`);
 
     if (card.value === "A" || card.value === "9") {
       playSpell(card, true);
@@ -1208,7 +1259,7 @@ function handleCpuShieldTrigger(card) {
 
   } else {
     cpuHand.push(card);
-    logCPU(`CPUはSTを温存：${cardName(card)} を手札へ`);
+    logCPU(`CPUはSTを温存：${cardName(card)} を手札に加えた`);
   }
 }
 
@@ -1263,7 +1314,7 @@ function breakPlayerShields(attacker, breakCount) {
 }
 
 /* ---------------------------------------------------------
-   ログヘルパー
+   ログ / 名前
 --------------------------------------------------------- */
 function logCPU(msg) {
   const div = document.createElement("div");
